@@ -9,8 +9,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download the embedding model at build time so cold starts are fast
-# and the container doesn't need network access to Hugging Face at runtime.
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+# and the container doesn't need to fetch it at runtime.
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/all-MiniLM-L6-v2')"
 
 COPY . .
 

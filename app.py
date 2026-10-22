@@ -27,13 +27,15 @@ import numpy as np
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 
 # ---------------------------------------------------------------------------
 # Config (all overridable with environment variables on the cloud)
 # ---------------------------------------------------------------------------
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.85"))
-EMBED_MODEL_NAME = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
+# fastembed uses ONNX runtime (no PyTorch), so the service fits comfortably in
+# a 512 MB instance -- which is what Render's free tier gives. Same MiniLM model.
+EMBED_MODEL_NAME = os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
 # LLM provider: defaults to Groq's OpenAI-compatible endpoint (free tier).
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
@@ -49,13 +51,17 @@ COST_PER_CALL_USD = float(os.getenv("COST_PER_CALL_USD", "0.0005"))
 # Embedding model -- loaded once at startup
 # ---------------------------------------------------------------------------
 print(f"Loading embedding model '{EMBED_MODEL_NAME}'...")
-embedder = SentenceTransformer(EMBED_MODEL_NAME)
+embedder = TextEmbedding(model_name=EMBED_MODEL_NAME)
 print("Embedding model ready.")
 
 
 def embed(text: str) -> np.ndarray:
-    vec = embedder.encode([text], normalize_embeddings=True)[0]
-    return np.asarray(vec, dtype=np.float32)
+    # fastembed returns a generator of numpy arrays, one per input text.
+    vec = np.asarray(next(embedder.embed([text])), dtype=np.float32)
+    # Normalize so cosine similarity is just a dot product. (MiniLM output is
+    # already near-unit length; normalizing again is a harmless safeguard.)
+    norm = np.linalg.norm(vec)
+    return vec / norm if norm else vec
 
 
 # ---------------------------------------------------------------------------
