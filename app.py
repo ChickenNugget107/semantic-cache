@@ -154,14 +154,14 @@ class AskRequest(BaseModel):
     use_cache: bool = True
 
 
-@app.post("/ask")
-def ask(req: AskRequest):
+def _process(question: str, use_cache: bool = True) -> dict:
+    """Core ask logic, shared by the /ask endpoint and the demo seeder."""
     t0 = time.time()
-    query = req.question.strip()
+    query = question.strip()
     query_vec = embed(query)
 
     cached_answer, similarity, matched = (None, 0.0, None)
-    if req.use_cache:
+    if use_cache:
         cached_answer, similarity, matched = cache.lookup(query_vec)
 
     if cached_answer is not None:
@@ -181,7 +181,7 @@ def ask(req: AskRequest):
 
     # Cache miss (or caching disabled) -> real LLM call
     answer = call_llm(query)
-    if req.use_cache:
+    if use_cache:
         cache.store(query, answer, query_vec)
     elapsed = time.time() - t0
     with stats_lock:
@@ -196,6 +196,11 @@ def ask(req: AskRequest):
         "latency_seconds": round(elapsed, 3),
         "cost_usd": COST_PER_CALL_USD,
     }
+
+
+@app.post("/ask")
+def ask(req: AskRequest):
+    return _process(req.question, req.use_cache)
 
 
 @app.get("/stats")
@@ -228,6 +233,50 @@ def reset():
         for k in stats:
             stats[k] = 0 if isinstance(stats[k], int) else 0.0
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Demo seeding -- so the dashboard shows real numbers the moment you open it.
+# Asked in order: the first of each pair is a miss (LLM call), the reworded
+# second is a cache hit. These are GENUINE runs through the same code path, so
+# the hit rate, latency and cost figures are real, not hand-typed.
+# ---------------------------------------------------------------------------
+SEED_DEMO = os.getenv("SEED_DEMO", "true").lower() in ("1", "true", "yes")
+DEMO_SEED_QUERIES = [
+    "What is the capital of France?",
+    "Tell me France's capital city.",            # hit
+    "How does photosynthesis work?",
+    "Explain the process of photosynthesis.",    # hit
+    "Who wrote Romeo and Juliet?",
+    "Which author wrote Romeo and Juliet?",      # hit
+]
+
+
+def seed_demo():
+    for q in DEMO_SEED_QUERIES:
+        try:
+            _process(q, use_cache=True)
+        except Exception:
+            pass
+
+
+@app.post("/seed")
+def seed():
+    """Clear, then reload the demo workload. Handy for re-seeding live."""
+    cache.clear()
+    with stats_lock:
+        for k in stats:
+            stats[k] = 0 if isinstance(stats[k], int) else 0.0
+    seed_demo()
+    return {"ok": True, "seeded": len(DEMO_SEED_QUERIES)}
+
+
+@app.on_event("startup")
+def _startup_seed():
+    # Seed in a background thread so the port opens immediately for Render's
+    # health check; the numbers fill in a couple of seconds later.
+    if SEED_DEMO:
+        threading.Thread(target=seed_demo, daemon=True).start()
 
 
 @app.get("/healthz")

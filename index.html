@@ -95,6 +95,7 @@
     <div class="card"><div class="label">Cost saved</div><div class="value" id="costSaved">$0</div></div>
   </div>
 
+  <button class="secondary" onclick="loadDemo()">Load demo data</button>
   <button class="secondary" onclick="resetAll()">Reset cache &amp; stats</button>
 
 <script>
@@ -139,6 +140,13 @@ async function refresh(){
 async function resetAll(){
   await fetch('/reset', {method:'POST'});
   document.getElementById('answer').innerHTML = '<span class="meta">Cache cleared.</span>';
+  refresh();
+}
+
+async function loadDemo(){
+  document.getElementById('answer').innerHTML = '<span class="meta">Loading demo data…</span>';
+  await fetch('/seed', {method:'POST'});
+  document.getElementById('answer').innerHTML = '<span class="meta">Demo data loaded — dashboard below reflects a sample run.</span>';
   refresh();
 }
 
